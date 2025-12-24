@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Link Hover Preview",
+  "version": "0.0.1",
+  "description": "Show link URL on hover",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

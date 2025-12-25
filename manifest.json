@@ -1,9 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Link Hover Preview",
-  "version": "0.0.1",
-  "description": "Show link URL on hover",
-  "permissions": [],
+  "version": "0.1.0",
+  "description": "Show link URL on hover + VirusTotal ring score",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.virustotal.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

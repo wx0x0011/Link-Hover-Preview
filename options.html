@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Link Hover Preview - Settings</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    .card { max-width: 680px; padding: 18px 18px; border: 1px solid #ddd; border-radius: 12px; }
+    label { display:block; font-weight:600; margin-bottom:8px; }
+    input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #ccc; font-size:14px; }
+    button { margin-top:12px; padding:10px 12px; border-radius:10px; border:0; background:#111; color:#fff; cursor:pointer; }
+    .hint { margin-top:10px; color:#555; font-size:13px; line-height:1.5; }
+    .status { margin-top:10px; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2 style="margin:0 0 10px 0;">VirusTotal API Key</h2>
+    <label for="key">Your API Key</label>
+    <input id="key" placeholder="Paste your VirusTotal API key here" />
+    <button id="save">Save</button>
+    <div class="status" id="status"></div>
+    <div class="hint">
+      建议只填写 <b>API Key</b>（不要填“链接”）。扩展会把 Key 存在浏览器的 sync storage 里，并只在后台请求 VirusTotal。
+    </div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

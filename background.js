@@ -25,6 +25,16 @@ async function getApiKey() {
   return (vtApiKey || "").trim();
 }
 
+async function getThresholds() {
+  const { vtThresholds } = await chrome.storage.sync.get(["vtThresholds"]);
+  const t = vtThresholds || {};
+  return {
+    maliciousRed: Number.isFinite(Number(t.maliciousRed)) ? Math.max(0, parseInt(t.maliciousRed, 10)) : 2,
+    suspiciousYellow: Number.isFinite(Number(t.suspiciousYellow)) ? Math.max(0, parseInt(t.suspiciousYellow, 10)) : 2
+  };
+}
+
+
 async function vtFetch(path, { method = "GET", apiKey, body } = {}) {
   const headers = {
     "x-apikey": apiKey
@@ -49,8 +59,7 @@ function normalizeUrl(url) {
   return String(url || "").trim();
 }
 
-function computeRingScore(stats) {
-  // stats: { harmless, malicious, suspicious, undetected, timeout, ... }
+function computeRingScore(stats, thresholds) {
   const harmless = Number(stats?.harmless ?? 0);
   const undetected = Number(stats?.undetected ?? 0);
   const suspicious = Number(stats?.suspicious ?? 0);
@@ -58,16 +67,25 @@ function computeRingScore(stats) {
   const timeout = Number(stats?.timeout ?? 0);
   const total = harmless + undetected + suspicious + malicious + timeout;
 
-  // “score” 这里按“非恶意/非可疑”为主的正向分：
   const score = harmless + undetected;
 
+  const redTh = thresholds?.maliciousRed ?? 2;
+  const yellowTh = thresholds?.suspiciousYellow ?? 2;
+
   let verdict = "unknown";
-  if (malicious > 0) verdict = "malicious";
-  else if (suspicious > 0) verdict = "suspicious";
+  if (malicious >= redTh && total > 0) verdict = "malicious";
+  else if (suspicious >= yellowTh && total > 0) verdict = "suspicious";
   else if (total > 0) verdict = "clean";
 
-  return { score, total: total || 0, verdict, stats: { harmless, undetected, suspicious, malicious, timeout } };
+  return {
+    score,
+    total: total || 0,
+    verdict,
+    thresholds: { maliciousRed: redTh, suspiciousYellow: yellowTh },
+    stats: { harmless, undetected, suspicious, malicious, timeout }
+  };
 }
+
 
 async function checkUrlWithVT(url) {
   pruneCache();
@@ -116,7 +134,8 @@ async function checkUrlWithVT(url) {
     const attrs = rep.json?.data?.attributes;
     const stats = attrs?.last_analysis_stats;
     const analysisDate = attrs?.last_analysis_date; // unix seconds (often)
-    const ring = computeRingScore(stats);
+    const thresholds = await getThresholds();
+    const ring = computeRingScore(stats, thresholds);
 
     const result = {
       ring,

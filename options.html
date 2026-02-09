@@ -14,14 +14,41 @@
     button { margin-top:14px; padding:10px 12px; border-radius:10px; border:0; background:#111; color:#fff; cursor:pointer; }
     .status { margin-top:10px; font-size:13px; }
     .hr { height:1px; background:#eee; margin:16px 0; }
+    .inline { display:flex; gap:8px; align-items:center; }
+    .ghost { background:#f3f3f3; color:#111; border:1px solid #ddd; }
+    .radio-group { display:flex; gap:12px; margin-top:8px; }
+    .radio-item { display:flex; align-items:flex-start; gap:6px; }
+    .radio-item input { width:auto; margin-top:2px; }
+    .radio-item label { margin:0; font-weight:500; }
   </style>
 </head>
 <body>
   <div class="card">
     <h2 style="margin:0 0 10px 0;">VirusTotal Settings</h2>
 
+    <h3 style="margin:0 0 6px 0;">Storage</h3>
+    <div class="small">
+      Choose where your extension settings are saved.
+      Sync uses your signed-in browser profile; Local keeps data only on this device.
+    </div>
+    <div class="radio-group">
+      <div class="radio-item">
+        <input id="storageSync" name="storageArea" type="radio" value="sync" />
+        <label for="storageSync">Sync (Google profile)</label>
+      </div>
+      <div class="radio-item">
+        <input id="storageLocal" name="storageArea" type="radio" value="local" />
+        <label for="storageLocal">Local (this device only)</label>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
     <label for="key">VirusTotal API Key</label>
-    <input id="key" placeholder="Paste your VirusTotal API key here" />
+    <div class="inline">
+      <input id="key" type="password" placeholder="Paste your VirusTotal API key here" />
+      <button id="toggleKey" class="ghost" type="button" style="margin-top:0;">Show</button>
+    </div>
 
     <div class="hr"></div>
 

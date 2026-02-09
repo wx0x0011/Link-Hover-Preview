@@ -3,30 +3,53 @@
 const VT_BASE = "https://www.virustotal.com/api/v3";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_CACHE_SIZE = 500;
+const STORAGE_PREF_KEY = "settingsStorageArea";
 
 const cache = new Map(); // url -> { ts, result }
 const inflight = new Map(); // url -> Promise
 
+let storageAreaCache = { area: "sync", ts: 0 };
+
 function pruneCache() {
-  // remove expired
   const now = Date.now();
   for (const [url, v] of cache) {
     if (now - v.ts > CACHE_TTL_MS) cache.delete(url);
   }
-  // cap size (naive FIFO by insertion order)
+
   while (cache.size > MAX_CACHE_SIZE) {
     const firstKey = cache.keys().next().value;
     cache.delete(firstKey);
   }
 }
 
+function getStorageByArea(area) {
+  return area === "local" ? chrome.storage.local : chrome.storage.sync;
+}
+
+async function getStorageAreaName() {
+  const now = Date.now();
+  if (now - storageAreaCache.ts < 5_000) {
+    return storageAreaCache.area;
+  }
+
+  const { [STORAGE_PREF_KEY]: area } = await chrome.storage.local.get([STORAGE_PREF_KEY]);
+  const normalized = area === "local" ? "local" : "sync";
+  storageAreaCache = { area: normalized, ts: now };
+  return normalized;
+}
+
+async function storageGet(keys) {
+  const area = await getStorageAreaName();
+  return getStorageByArea(area).get(keys);
+}
+
 async function getApiKey() {
-  const { vtApiKey } = await chrome.storage.sync.get(["vtApiKey"]);
+  const { vtApiKey } = await storageGet(["vtApiKey"]);
   return (vtApiKey || "").trim();
 }
 
 async function getThresholds() {
-  const { vtThresholds } = await chrome.storage.sync.get(["vtThresholds"]);
+  const { vtThresholds } = await storageGet(["vtThresholds"]);
   const t = vtThresholds || {};
   return {
     maliciousRed: Number.isFinite(Number(t.maliciousRed)) ? Math.max(0, parseInt(t.maliciousRed, 10)) : 2,
@@ -34,13 +57,24 @@ async function getThresholds() {
   };
 }
 
+function normalizeUrl(url) {
+  return String(url || "").trim();
+}
+
+function isSupportedUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 async function vtFetch(path, { method = "GET", apiKey, body } = {}) {
   const headers = {
     "x-apikey": apiKey
   };
 
-  // VT URL submission expects form-encoded body
   if (body instanceof URLSearchParams) {
     headers["content-type"] = "application/x-www-form-urlencoded";
   }
@@ -49,14 +83,13 @@ async function vtFetch(path, { method = "GET", apiKey, body } = {}) {
   const text = await resp.text();
 
   let json = null;
-  try { json = JSON.parse(text); } catch { /* ignore */ }
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // keep json as null
+  }
 
   return { ok: resp.ok, status: resp.status, json, raw: text };
-}
-
-function normalizeUrl(url) {
-  // Keep as-is, but strip trailing spaces
-  return String(url || "").trim();
 }
 
 function computeRingScore(stats, thresholds) {
@@ -86,11 +119,12 @@ function computeRingScore(stats, thresholds) {
   };
 }
 
-
 async function checkUrlWithVT(url) {
   pruneCache();
   url = normalizeUrl(url);
+
   if (!url) return { status: "bad_url" };
+  if (!isSupportedUrl(url)) return { status: "unsupported_protocol" };
 
   const cached = cache.get(url);
   if (cached && Date.now() - cached.ts <= CACHE_TTL_MS) {
@@ -103,16 +137,11 @@ async function checkUrlWithVT(url) {
     const apiKey = await getApiKey();
     if (!apiKey) return { status: "no_key" };
 
-    // 1) Submit URL to get its ID (VT will return an id we can use for GET)
     const form = new URLSearchParams();
     form.set("url", url);
 
     const sub = await vtFetch("/urls", { method: "POST", apiKey, body: form });
 
-    // Common cases:
-    // - 200/201 OK: return data.id
-    // - 429 rate limited
-    // - 401 invalid key
     if (!sub.ok) {
       if (sub.status === 401 || sub.status === 403) return { status: "auth_error", code: sub.status };
       if (sub.status === 429) return { status: "rate_limited", code: 429 };
@@ -122,7 +151,6 @@ async function checkUrlWithVT(url) {
     const id = sub.json?.data?.id;
     if (!id) return { status: "submit_error", code: sub.status, detail: sub.json || sub.raw };
 
-    // 2) Fetch report by id
     const rep = await vtFetch(`/urls/${encodeURIComponent(id)}`, { method: "GET", apiKey });
 
     if (!rep.ok) {
@@ -133,7 +161,7 @@ async function checkUrlWithVT(url) {
 
     const attrs = rep.json?.data?.attributes;
     const stats = attrs?.last_analysis_stats;
-    const analysisDate = attrs?.last_analysis_date; // unix seconds (often)
+    const analysisDate = attrs?.last_analysis_date;
     const thresholds = await getThresholds();
     const ring = computeRingScore(stats, thresholds);
 
@@ -146,18 +174,23 @@ async function checkUrlWithVT(url) {
     pruneCache();
 
     return { status: "ok", ...result, cached: false };
-  })()
-    .finally(() => inflight.delete(url));
+  })().finally(() => inflight.delete(url));
 
   inflight.set(url, p);
   return p;
 }
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local") return;
+  if (!Object.prototype.hasOwnProperty.call(changes, STORAGE_PREF_KEY)) return;
+  storageAreaCache.ts = 0;
+});
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "vt_check") {
     checkUrlWithVT(msg.url)
       .then(sendResponse)
       .catch((e) => sendResponse({ status: "exception", detail: String(e?.message || e) }));
-    return true; // keep channel open
+    return true;
   }
 });

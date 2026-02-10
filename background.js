@@ -148,20 +148,21 @@ async function checkUrlWithVT(url) {
       return { status: "submit_error", code: sub.status, detail: sub.json || sub.raw };
     }
 
-    const id = sub.json?.data?.id;
-    if (!id) return { status: "submit_error", code: sub.status, detail: sub.json || sub.raw };
+    const analysisId = sub.json?.data?.id;
+    if (!analysisId) return { status: "submit_error", code: sub.status, detail: sub.json || sub.raw };
 
-    const rep = await vtFetch(`/urls/${encodeURIComponent(id)}`, { method: "GET", apiKey });
+    // POST /urls returns analysis id, so follow up with /analyses/{id}.
+    const analysis = await vtFetch(`/analyses/${encodeURIComponent(analysisId)}`, { method: "GET", apiKey });
 
-    if (!rep.ok) {
-      if (rep.status === 401 || rep.status === 403) return { status: "auth_error", code: rep.status };
-      if (rep.status === 429) return { status: "rate_limited", code: 429 };
-      return { status: "report_error", code: rep.status, detail: rep.json || rep.raw };
+    if (!analysis.ok) {
+      if (analysis.status === 401 || analysis.status === 403) return { status: "auth_error", code: analysis.status };
+      if (analysis.status === 429) return { status: "rate_limited", code: 429 };
+      return { status: "analysis_error", code: analysis.status, detail: analysis.json || analysis.raw };
     }
 
-    const attrs = rep.json?.data?.attributes;
-    const stats = attrs?.last_analysis_stats;
-    const analysisDate = attrs?.last_analysis_date;
+    const attrs = analysis.json?.data?.attributes;
+    const stats = attrs?.stats || attrs?.last_analysis_stats;
+    const analysisDate = attrs?.date ?? attrs?.last_analysis_date ?? null;
     const thresholds = await getThresholds();
     const ring = computeRingScore(stats, thresholds);
 

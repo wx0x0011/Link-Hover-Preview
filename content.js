@@ -1,5 +1,26 @@
 const STORAGE_PREF_KEY = "settingsStorageArea";
 const HOVER_DELAY_MS = 220;
+let brandGuardEnabled = true;
+const brandGuardWarnings = new WeakMap();
+
+chrome.storage.local.get(["lhpBrandGuardEnabled"]).then(({lhpBrandGuardEnabled}) => {
+  brandGuardEnabled = lhpBrandGuardEnabled !== false;
+}).catch(() => {});
+
+function inspectBrandGuard(anchor) {
+  if (!brandGuardEnabled || !globalThis.LHPBrandGuard) return { status: "none" };
+  const verdict = globalThis.LHPBrandGuard.analyze(anchor.href, anchor.textContent || "");
+  brandGuardWarnings.set(anchor, { href: anchor.href, verdict });
+  return verdict;
+}
+function brandGuardMessage(result) {
+  if (result.status === "warning") {
+    return "⚠ Possible " + result.brand + " impersonation: expected " +
+      result.expectedDomain + ", actual " + result.hostname + ". " + result.reason;
+  }
+  if (result.status === "notice") return "ℹ Domain caution: " + result.reason;
+  return "";
+}
 
 let tipHost = null;
 let tipShadow = null;
@@ -88,7 +109,8 @@ function ensureTip() {
   tipEls = {
     url: tipShadow.getElementById("lhp_url"),
     ring: tipShadow.getElementById("lhp_ring"),
-    sub: tipShadow.getElementById("lhp_sub")
+    sub: tipShadow.getElementById("lhp_sub"),
+    brand: tipShadow.getElementById("lhp_brand")
   };
 
   document.documentElement.appendChild(tipHost);
@@ -115,6 +137,8 @@ function showTip(url) {
   const t = ensureTip();
   tipEls.url.textContent = url;
   tipEls.sub.textContent = "";
+  tipEls.brand.textContent = "";
+  tipEls.brand.style.display = "none";
   setRingState({ mode: "idle" });
   t.style.display = "block";
   setTipPosition(lastMouseX, lastMouseY);
@@ -291,6 +315,13 @@ document.addEventListener("pointerover", (e) => {
 
   lastAnchor = a;
   showTip(href);
+  const brandResult = inspectBrandGuard(a);
+  const brandText = brandGuardMessage(brandResult);
+  if (brandText) {
+    tipEls.brand.textContent = brandText;
+    tipEls.brand.style.display = "block";
+    setTipPosition(lastMouseX, lastMouseY);
+  }
 
   if (!isSupportedProtocol(href)) {
     setRingState({ mode: "idle" });
@@ -340,5 +371,41 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     if (isSupportedProtocol(href)) {
       queryVT(href);
     }
+  }
+});
+
+/* High-confidence domain lookalikes require an explicit second click.
+ * Never silently navigate or alter the link. Only active for warnings. */
+let approvedNavigation = null;
+document.addEventListener("click", (e) => {
+  const anchor = getAnchor(e.target);
+  if (!anchor || !brandGuardEnabled || !globalThis.LHPBrandGuard) return;
+  const url = anchor.href;
+  if (approvedNavigation === url) {
+    approvedNavigation = null;
+    return;
+  }
+  const verdict = inspectBrandGuard(anchor);
+  if (verdict.status !== "warning") return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const confirmed = window.confirm(
+    "Link Hover Preview — BrandGuard\n\n" +
+    "Possible " + verdict.brand + " impersonation.\n" +
+    "Expected official domain: " + verdict.expectedDomain + "\n" +
+    "Actual destination: " + verdict.hostname + "\n\n" +
+    verdict.reason + "\n\n" +
+    "This is a heuristic warning, not a malware verdict.\n\n" +
+    "Continue to this link anyway?"
+  );
+  if (!confirmed) return;
+  approvedNavigation = url;
+  // Use a browser-native anchor navigation rather than extension-side fetch.
+  anchor.click();
+}, true);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.lhpBrandGuardEnabled) {
+    brandGuardEnabled = changes.lhpBrandGuardEnabled.newValue !== false;
   }
 });

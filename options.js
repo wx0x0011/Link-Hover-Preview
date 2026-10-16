@@ -1,3 +1,10 @@
+const brandGuardEl = document.getElementById("brandGuardEnabled");
+chrome.storage.local.get(["lhpBrandGuardEnabled"]).then(v => {
+  brandGuardEl.checked = v.lhpBrandGuardEnabled !== false;
+});
+brandGuardEl.addEventListener("change", () => {
+  chrome.storage.local.set({ lhpBrandGuardEnabled: brandGuardEl.checked });
+});
 const keyEl = document.getElementById("key");
 const toggleKeyBtn = document.getElementById("toggleKey");
 const malRedEl = document.getElementById("malRed");
